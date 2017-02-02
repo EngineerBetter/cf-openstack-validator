@@ -27,19 +27,19 @@ module Validator
       def extensions_paths
         custom_paths = RSpec.configuration.validator_config.custom_extension_paths
 
-        if custom_paths.empty?
-          path = default_extension_path
-          return [path] if File.directory?(path)
-        else
-          return custom_paths
-        end
-
-        []
+        # if custom_paths.empty?
+        #   path = default_extension_path
+        #   return [path] if File.directory?(path)
+        # else
+        #   return custom_paths
+        # end
+        #
+        # []
       end
-
-      def default_extension_path
-        File.join(File.dirname(RSpec.configuration.validator_config.path), 'extensions')
-      end
+      #
+      # def default_extension_path
+      #   File.join(File.dirname(RSpec.configuration.validator_config.path), 'extensions')
+      # end
     end
   end
 end

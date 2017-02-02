@@ -2,7 +2,13 @@ require_relative '../spec_helper'
 
 describe Validator::Extensions do
 
-  let(:validator_config_content) { nil }
+  let(:absolute_path_to_extensions) { Dir.mktmpdir }
+  let(:validator_config_content) do
+      <<-EOF
+extensions:
+  paths: [#{absolute_path_to_extensions}]
+      EOF
+  end
 
   before(:each) do
     @tmpdir = Dir.mktmpdir
@@ -19,15 +25,11 @@ describe Validator::Extensions do
 
   after(:each) do
     FileUtils.rm_rf(@tmpdir)
+    FileUtils.rmtree(absolute_path_to_extensions)
   end
 
   describe '.all' do
     context 'when extension folder is used' do
-
-      before(:each) do
-        @extensionsdir = File.join(@cf_openstack_validator, 'extensions')
-        FileUtils.mkdir(@extensionsdir)
-      end
 
       context 'and contains no _spec.rb files' do
         it 'returns no specs' do
@@ -37,25 +39,25 @@ describe Validator::Extensions do
 
       context 'and contains multiple _spec.rb files' do
         before do
-          FileUtils.touch(File.join(@extensionsdir, 'test1_spec.rb'))
-          FileUtils.touch(File.join(@extensionsdir, 'test2_spec.rb'))
+          FileUtils.touch(File.join(absolute_path_to_extensions, 'test1_spec.rb'))
+          FileUtils.touch(File.join(absolute_path_to_extensions, 'test2_spec.rb'))
         end
 
         it 'returns all specs' do
           specs = Validator::Extensions.all
           expect(specs.size).to eq(2)
-          expect(specs).to eq(["#{@extensionsdir}/test1_spec.rb", "#{@extensionsdir}/test2_spec.rb"])
+          expect(specs).to eq(["#{absolute_path_to_extensions}/test1_spec.rb", "#{absolute_path_to_extensions}/test2_spec.rb"])
         end
 
         context 'and also contains non-spec files' do
           before do
-            FileUtils.touch(File.join(@extensionsdir, 'some-file'))
+            FileUtils.touch(File.join(absolute_path_to_extensions, 'some-file'))
           end
 
           it 'returns only the spec files' do
             specs = Validator::Extensions.all
             expect(specs.size).to equal(2)
-            expect(specs).to eq(["#{@extensionsdir}/test1_spec.rb", "#{@extensionsdir}/test2_spec.rb"])
+            expect(specs).to eq(["#{absolute_path_to_extensions}/test1_spec.rb", "#{absolute_path_to_extensions}/test2_spec.rb"])
           end
         end
       end
