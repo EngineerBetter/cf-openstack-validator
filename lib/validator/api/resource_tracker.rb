@@ -10,6 +10,14 @@ module Validator
           volume:  [:volumes, :snapshots]
       }
 
+      DEFAULT_GET_BLOCK = -> (service, type, id){
+        begin
+          FogOpenStack.send(service).send(type).get(id)
+        rescue Fog::Errors::NotFound
+          nil
+        end
+      }
+
       TYPE_DEFINITIONS = {
           servers: {wait_block: Proc.new { ready? }, destroy_block: Proc.new do |vm_cid|
             begin
@@ -20,7 +28,13 @@ module Validator
             end
           end },
           volumes: {wait_block: Proc.new { ready? }},
-          images: {wait_block: Proc.new { status == 'active' }},
+          images: {
+            wait_block: Proc.new { status == 'active' },
+            get_block: -> (service, type, id) {
+              DEFAULT_GET_BLOCK.(service, type, id)
+            },
+            # destroy_block: Proc.new {}
+          },
           snapshots: {wait_block: Proc.new { status == 'available' }},
           networks: {wait_block: Proc.new { status == 'ACTIVE' }},
           ports: {wait_block: Proc.new { status == 'ACTIVE' }},
@@ -135,9 +149,12 @@ module Validator
       end
 
       def get_resource(type, id)
-        FogOpenStack.send(service(type)).send(type).get(id)
-      rescue Fog::Errors::NotFound
-        nil
+        fog_service = service(type)
+
+        get_block = TYPE_DEFINITIONS.fetch(type, {}).fetch(:get_block, DEFAULT_GET_BLOCK)
+
+        get_block.(fog_service, type, id)
+
       end
 
     end

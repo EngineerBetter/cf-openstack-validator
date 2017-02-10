@@ -35,6 +35,26 @@ module Validator::Api
         expect(subject.count).to eq(1)
       end
 
+      context "when ':images' resource" do
+        context 'when light stemcell' do
+          it 'does not get the resource' do
+
+            # produce
+            #   should not get the resource from the backend OR should get the original stemcell
+            #   should not call wait_for                     OR should check whether the original stemcell is active
+            #   should add the light stemcell to its resources
+
+
+            allow(resource).to receive(:ready?)
+
+            subject.produce(:images) { 'id light' }
+
+            expect(resources).to_not have_received(:get)
+          end
+        end
+
+      end
+
       [:servers, :volumes].each do |type|
         context "when #{type} resource" do
           it 'calls wait_for using "ready?"' do
