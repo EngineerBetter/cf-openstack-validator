@@ -1,7 +1,6 @@
 module Validator
   module Api
     class ResourceTracker
-      extend Validator::Api::CpiHelpers
 
       RESOURCE_SERVICES = {
           compute: [:flavors, :key_pairs, :servers],
@@ -10,35 +9,81 @@ module Validator
           volume:  [:volumes, :snapshots]
       }
 
-      DEFAULT_GET_BLOCK = -> (service, type, id){
-        begin
-          FogOpenStack.send(service).send(type).get(id)
+      class Base
+        extend Validator::Api::CpiHelpers
+        attr_accessor :wait_for
+
+        def initialize(wait_for: Proc.new { status == 'ACTIVE' })
+          @wait_for = wait_for
+        end
+
+        def get(type, id)
+          FogOpenStack.send(service(type)).send(type).get(id)
         rescue Fog::Errors::NotFound
           nil
         end
-      }
 
-      TYPE_DEFINITIONS = {
-          servers: {wait_block: Proc.new { ready? }, destroy_block: Proc.new do |vm_cid|
-            begin
-              cpi.delete_vm(vm_cid)
-              true
-            rescue Bosh::Clouds::CloudError => e
-              false
-            end
-          end },
-          volumes: {wait_block: Proc.new { ready? }},
-          images: {
-            wait_block: Proc.new { status == 'active' },
-            get_block: -> (service, type, id) {
-              DEFAULT_GET_BLOCK.(service, type, id)
-            },
-            # destroy_block: Proc.new {}
-          },
-          snapshots: {wait_block: Proc.new { status == 'available' }},
-          networks: {wait_block: Proc.new { status == 'ACTIVE' }},
-          ports: {wait_block: Proc.new { status == 'ACTIVE' }},
-          routers: {wait_block: Proc.new { status == 'ACTIVE' }},
+        def destroy(type, id)
+          get(type, id).destroy
+        end
+
+        def service(resource_type)
+          RESOURCE_SERVICES.each do |service, types|
+            return service if types.include?(resource_type)
+          end
+
+          nil
+        end
+      end
+
+      class Images < Base
+
+        class LightStemcellImageRosource
+          def initialize(id)
+            @id = id
+          end
+
+          def wait_for(&block)
+            true
+          end
+
+          def name
+            "light_stemcell_#{@id}"
+          end
+        end
+
+        def get(type, id)
+          if id =~ / light$/
+            # LightStemcellImageRosource.new(id)
+            OpenStruct.new(:name => "light_stemcell_#{@id}", :wait_for => true)
+          else
+            super(type, id)
+          end
+        end
+
+        def destroy(_, stemcell_cid)
+          Base.cpi.delete_stemcell(stemcell_cid)
+          true
+        rescue Bosh::Clouds::CloudError => e
+          false
+        end
+
+      end
+
+      class Servers < Base
+        def destroy(_, vm_cid)
+          Base.cpi.delete_vm(vm_cid)
+          true
+        rescue Bosh::Clouds::CloudError => e
+          false
+        end
+      end
+
+      RESOURCE_HANDLER = {
+        images: Images.new(wait_for: Proc.new { status == 'active' } ),
+        servers: Servers.new(wait_for: Proc.new { ready? }),
+        volumes: Base.new(wait_for: Proc.new { ready? }),
+        snapshots: Base.new(wait_for: Proc.new { status == 'available' })
       }
 
       ##
@@ -82,10 +127,17 @@ module Validator
 
         if block_given?
           resource_id = yield
-          resource = get_resource(type, resource_id)
-          if TYPE_DEFINITIONS.key?(type) && TYPE_DEFINITIONS[type].key?(:wait_block)
-            resource.wait_for(&TYPE_DEFINITIONS[type][:wait_block])
-          end
+          resource_handler = RESOURCE_HANDLER.fetch(type, Base.new)
+
+          resource = resource_handler.get(type, resource_id)
+
+          resource.wait_for(
+            &resource_handler.wait_for
+          )
+
+          # if TYPE_DEFINITIONS.key?(type) && TYPE_DEFINITIONS[type].key?(:wait_block)
+          #   resource.wait_for(&TYPE_DEFINITIONS[type][:wait_block])
+          # end
           @resources << {
               type: type,
               id: resource_id,
@@ -120,17 +172,20 @@ module Validator
 
       def cleanup
         resources.map do |resource|
-          if TYPE_DEFINITIONS.key?(resource[:type]) && TYPE_DEFINITIONS[resource[:type]].key?(:destroy_block)
-            TYPE_DEFINITIONS[resource[:type]][:destroy_block].call(resource[:id])
-          else
-            get_resource(resource[:type], resource[:id]).destroy
-          end
+          RESOURCE_HANDLER.fetch(resource[:type], Base.new).destroy(resource[:type], resource[:id])
+
+
+          # if TYPE_DEFINITIONS.key?(resource[:type]) && TYPE_DEFINITIONS[resource[:type]].key?(:destroy_block)
+          #   TYPE_DEFINITIONS[resource[:type]][:destroy_block].call(resource[:id])
+          # else
+          #   get_resource(resource[:type], resource[:id]).destroy
+          # end
         end.all?
       end
 
       def resources
         @resources.reject do |resource|
-          nil == get_resource(resource[:type], resource[:id])
+          nil == RESOURCE_HANDLER.fetch(resource[:type], Base.new).get(resource[:type], resource[:id])
         end
       end
 
@@ -148,14 +203,19 @@ module Validator
         nil
       end
 
-      def get_resource(type, id)
-        fog_service = service(type)
+      # def get_resource(type, id)
+      #   fog_service = service(type)
+      #   get_block = TYPE_DEFINITIONS.fetch(type, {}).fetch(:get_block, DEFAULT_GET_BLOCK)
+      #
+      #   get_block.(fog_service, type, id)
+      #
+      # end
 
-        get_block = TYPE_DEFINITIONS.fetch(type, {}).fetch(:get_block, DEFAULT_GET_BLOCK)
+      # def get_resource(type, id)
+      #   fog_service = service(type)
+      #   GETS.fetch(type, Base.new).get(fog_service, type, id)
+      # end
 
-        get_block.(fog_service, type, id)
-
-      end
 
     end
   end
